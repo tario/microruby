@@ -68,7 +68,6 @@ rb_call_inits()
     Init_Struct();
     Init_Regexp();
     Init_Range();
-    Init_IO();
     Init_Time();
     Init_Random();
     Init_signal();

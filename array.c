@@ -1369,7 +1369,9 @@ rb_ary_dup(ary)
     return dup;
 }
 
-extern VALUE rb_output_fs;
+VALUE rb_output_fs;
+VALUE rb_output_rs;
+VALUE rb_rs;
 
 static VALUE
 inspect_join(ary, arg)
@@ -3862,6 +3864,12 @@ Init_Array()
     rb_define_method(rb_cArray, "take_while", rb_ary_take_while, 0);
     rb_define_method(rb_cArray, "drop", rb_ary_drop, 1);
     rb_define_method(rb_cArray, "drop_while", rb_ary_drop_while, 0);
+
+
+    rb_define_hooked_variable("$,", &rb_output_fs, 0, rb_str_setter);
+    rb_define_hooked_variable("$\\", &rb_output_rs, 0, rb_str_setter);
+    rb_define_hooked_variable("$/", &rb_rs, 0, rb_str_setter);  
+    rb_define_hooked_variable("$-0", &rb_rs, 0, rb_str_setter);
 
     id_cmp = rb_intern("<=>");
     inspect_key = rb_intern("__inspect_key__");
