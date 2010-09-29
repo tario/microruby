@@ -23,7 +23,6 @@
 #include "wince.h"
 #endif
 #include "ruby.h"
-#include "dln.h"
 #include "node.h"
 #include <stdio.h>
 #include <sys/types.h>

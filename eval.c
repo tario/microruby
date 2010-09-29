@@ -31,7 +31,6 @@
 #include <stdio.h>
 
 #include "st.h"
-#include "dln.h"
 
 #ifdef __APPLE__
 #include <crt_externs.h>

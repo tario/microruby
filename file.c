@@ -24,7 +24,6 @@
 #include "rubyio.h"
 #include "rubysig.h"
 #include "util.h"
-#include "dln.h"
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
