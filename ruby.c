@@ -817,14 +817,7 @@ proc_options(argc, argv)
 	    else if (do_search) {
 		char *path = getenv("RUBYPATH");
 
-		script = 0;
-		if (path) {
-		    script = dln_find_file(argv[0], path);
-		}
-		if (!script) {
-		    script = dln_find_file(argv[0], getenv(PATH_ENV));
-		}
-		if (!script) script = argv[0];
+		script = "";
 		script = ruby_sourcefile = rb_source_filename(script);
 		script_node = NEW_NEWLINE(0);
 #if defined DOSISH || defined __CYGWIN__
