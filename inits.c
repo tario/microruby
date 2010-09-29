@@ -67,10 +67,8 @@ rb_call_inits()
     Init_Hash();
     Init_Struct();
     Init_Regexp();
-    Init_pack();
     Init_Range();
     Init_IO();
-    Init_Dir();
     Init_Time();
     Init_Random();
     Init_signal();
@@ -78,9 +76,7 @@ rb_call_inits()
     Init_load();
     Init_Proc();
     Init_Binding();
-    Init_Math();
     Init_GC();
     Init_Enumerator();
-    Init_marshal();
     Init_version();
 }
