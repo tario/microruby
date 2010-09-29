@@ -363,43 +363,6 @@ add_modules(mod)
 extern void Init_ext _((void));
 
 static void
-require_libraries()
-{
-    extern NODE *ruby_eval_tree;
-    extern NODE *ruby_eval_tree_begin;
-    NODE *save[3];
-    struct req_list *list = req_list_head.next;
-    struct req_list *tmp;
-
-    save[0] = ruby_eval_tree;
-    save[1] = ruby_eval_tree_begin;
-    save[2] = NEW_NEWLINE(0);
-    ruby_eval_tree = ruby_eval_tree_begin = 0;
-    ruby_current_node = 0;
-    ruby_current_node = save[2];
-    ruby_set_current_source();
-    req_list_last = 0;
-    while (list) {
-	int state;
-
-	ruby_current_node = 0;
-	rb_protect((VALUE (*)(VALUE))rb_require, (VALUE)list->name, &state);
-	if (state) rb_jump_tag(state);
-	tmp = list->next;
-	free(list->name);
-	free(list);
-	list = tmp;
-	ruby_current_node = save[2];
-	ruby_set_current_source();
-    }
-    req_list_head.next = 0;
-    ruby_eval_tree = save[0];
-    ruby_eval_tree_begin = save[1];
-    rb_gc_force_recycle((VALUE)save[2]);
-    ruby_current_node = 0;
-}
-
-static void
 process_sflag()
 {
     if (sflag) {
@@ -835,7 +798,6 @@ proc_options(argc, argv)
     ruby_init_loadpath();
     ruby_sourcefile = rb_source_filename(argv0);
     if (e_script) {
-	require_libraries();
 	rb_compile_string(script, e_script, 1);
     }
     else if (strlen(script) == 1 && script[0] == '-') {
@@ -963,7 +925,6 @@ load_file(fname, script)
 	else if (!NIL_P(c)) {
 	    rb_io_ungetc(f, c);
 	}
-	require_libraries();	/* Why here? unnatural */
 	if (NIL_P(c)) return;
     }
     rb_compile_file(fname, f, line_start);

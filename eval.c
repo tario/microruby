@@ -1948,7 +1948,7 @@ ev_const_get(cref, id, self)
 	    while (RCLASS(klass)->iv_tbl &&
 		   st_lookup(RCLASS(klass)->iv_tbl, id, &result)) {
 		if (result == Qundef) {
-		    if (!RTEST(rb_autoload_load(klass, id))) break;
+//		    if (!RTEST(rb_autoload_load(klass, id))) break;
 		    continue;
 		}
 		return result;

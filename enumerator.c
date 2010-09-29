@@ -400,7 +400,6 @@ static VALUE
 enumerator_next(obj)
     VALUE obj;
 {
-    rb_require("generator");
     return rb_funcall(obj, rb_intern("next"), 0, 0);
 }
 
@@ -415,7 +414,6 @@ static VALUE
 enumerator_rewind(obj)
     VALUE obj;
 {
-    rb_require("generator");
     return rb_funcall(obj, rb_intern("rewind"), 0, 0);
 }
 
