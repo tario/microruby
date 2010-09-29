@@ -3762,9 +3762,6 @@ rb_str_each_line(argc, argv, str)
     long len = RSTRING(str)->len, rslen;
     VALUE line;
 
-    if (rb_scan_args(argc, argv, "01", &rs) == 0) {
-	rs = rb_rs;
-    }
     RETURN_ENUMERATOR(str, argc, argv);
     if (NIL_P(rs)) {
 	rb_yield(str);
@@ -4000,171 +3997,6 @@ rb_f_chop()
     return str;
 }
 
-
-/*
- *  call-seq:
- *     str.chomp!(separator=$/)   => str or nil
- *  
- *  Modifies <i>str</i> in place as described for <code>String#chomp</code>,
- *  returning <i>str</i>, or <code>nil</code> if no modifications were made.
- */
-
-static VALUE
-rb_str_chomp_bang(argc, argv, str)
-    int argc;
-    VALUE *argv;
-    VALUE str;
-{
-    VALUE rs;
-    int newline;
-    char *p;
-    long len, rslen;
-
-    if (rb_scan_args(argc, argv, "01", &rs) == 0) {
-	len = RSTRING(str)->len;
-	if (len == 0) return Qnil;
-	p = RSTRING(str)->ptr;
-	rs = rb_rs;
-	if (rs == rb_default_rs) {
-	  smart_chomp:
-	    rb_str_modify(str);
-	    if (RSTRING(str)->ptr[len-1] == '\n') {
-		RSTRING(str)->len--;
-		if (RSTRING(str)->len > 0 &&
-		    RSTRING(str)->ptr[RSTRING(str)->len-1] == '\r') {
-		    RSTRING(str)->len--;
-		}
-	    }
-	    else if (RSTRING(str)->ptr[len-1] == '\r') {
-		RSTRING(str)->len--;
-	    }
-	    else {
-		return Qnil;
-	    }
-	    RSTRING(str)->ptr[RSTRING(str)->len] = '\0';
-	    return str;
-	}
-    }
-    if (NIL_P(rs)) return Qnil;
-    StringValue(rs);
-    len = RSTRING(str)->len;
-    if (len == 0) return Qnil;
-    p = RSTRING(str)->ptr;
-    rslen = RSTRING(rs)->len;
-    if (rslen == 0) {
-	while (len>0 && p[len-1] == '\n') {
-	    len--;
-	    if (len>0 && p[len-1] == '\r')
-		len--;
-	}
-	if (len < RSTRING(str)->len) {
-	    rb_str_modify(str);
-	    RSTRING(str)->len = len;
-	    RSTRING(str)->ptr[len] = '\0';
-	    return str;
-	}
-	return Qnil;
-    }
-    if (rslen > len) return Qnil;
-    newline = RSTRING(rs)->ptr[rslen-1];
-    if (rslen == 1 && newline == '\n')
-	goto smart_chomp;
-
-    if (p[len-1] == newline &&
-	(rslen <= 1 ||
-	 rb_memcmp(RSTRING(rs)->ptr, p+len-rslen, rslen) == 0)) {
-	rb_str_modify(str);
-	RSTRING(str)->len -= rslen;
-	RSTRING(str)->ptr[RSTRING(str)->len] = '\0';
-	return str;
-    }
-    return Qnil;
-}
-
-
-/*
- *  call-seq:
- *     str.chomp(separator=$/)   => new_str
- *  
- *  Returns a new <code>String</code> with the given record separator removed
- *  from the end of <i>str</i> (if present). If <code>$/</code> has not been
- *  changed from the default Ruby record separator, then <code>chomp</code> also
- *  removes carriage return characters (that is it will remove <code>\n</code>,
- *  <code>\r</code>, and <code>\r\n</code>).
- *     
- *     "hello".chomp            #=> "hello"
- *     "hello\n".chomp          #=> "hello"
- *     "hello\r\n".chomp        #=> "hello"
- *     "hello\n\r".chomp        #=> "hello\n"
- *     "hello\r".chomp          #=> "hello"
- *     "hello \n there".chomp   #=> "hello \n there"
- *     "hello".chomp("llo")     #=> "he"
- */
-
-static VALUE
-rb_str_chomp(argc, argv, str)
-    int argc;
-    VALUE *argv;
-    VALUE str;
-{
-    str = rb_str_dup(str);
-    rb_str_chomp_bang(argc, argv, str);
-    return str;
-}
-
-/*
- *  call-seq:
- *     chomp!             => $_ or nil
- *     chomp!(string)     => $_ or nil
- *  
- *  Equivalent to <code>$_.chomp!(<em>string</em>)</code>. See
- *  <code>String#chomp!</code>
- *     
- *     $_ = "now\n"
- *     chomp!       #=> "now"
- *     $_           #=> "now"
- *     chomp! "x"   #=> nil
- *     $_           #=> "now"
- */
-
-static VALUE
-rb_f_chomp_bang(argc, argv)
-    int argc;
-    VALUE *argv;
-{
-    return rb_str_chomp_bang(argc, argv, uscore_get());
-}
-
-/*
- *  call-seq:
- *     chomp            => $_
- *     chomp(string)    => $_
- *  
- *  Equivalent to <code>$_ = $_.chomp(<em>string</em>)</code>. See
- *  <code>String#chomp</code>.
- *     
- *     $_ = "now\n"
- *     chomp         #=> "now"
- *     $_            #=> "now"
- *     chomp "ow"    #=> "n"
- *     $_            #=> "n"
- *     chomp "xxx"   #=> "n"
- *     $_            #=> "n"
- */
-
-static VALUE
-rb_f_chomp(argc, argv)
-    int argc;
-    VALUE *argv;
-{
-    VALUE str = uscore_get();
-    VALUE dup = rb_str_dup(str);
-
-    if (NIL_P(rb_str_chomp_bang(argc, argv, dup)))
-	return str;
-    rb_lastline_set(dup);
-    return dup;
-}
 
 
 /*
@@ -4969,7 +4801,6 @@ Init_String()
     rb_define_method(rb_cString, "sub", rb_str_sub, -1);
     rb_define_method(rb_cString, "gsub", rb_str_gsub, -1);
     rb_define_method(rb_cString, "chop", rb_str_chop, 0);
-    rb_define_method(rb_cString, "chomp", rb_str_chomp, -1);
     rb_define_method(rb_cString, "strip", rb_str_strip, 0);
     rb_define_method(rb_cString, "lstrip", rb_str_lstrip, 0);
     rb_define_method(rb_cString, "rstrip", rb_str_rstrip, 0);
@@ -4977,7 +4808,6 @@ Init_String()
     rb_define_method(rb_cString, "sub!", rb_str_sub_bang, -1);
     rb_define_method(rb_cString, "gsub!", rb_str_gsub_bang, -1);
     rb_define_method(rb_cString, "chop!", rb_str_chop_bang, 0);
-    rb_define_method(rb_cString, "chomp!", rb_str_chomp_bang, -1);
     rb_define_method(rb_cString, "strip!", rb_str_strip_bang, 0);
     rb_define_method(rb_cString, "lstrip!", rb_str_lstrip_bang, 0);
     rb_define_method(rb_cString, "rstrip!", rb_str_rstrip_bang, 0);
@@ -5012,9 +4842,6 @@ Init_String()
 
     rb_define_global_function("chop", rb_f_chop, 0);
     rb_define_global_function("chop!", rb_f_chop_bang, 0);
-
-    rb_define_global_function("chomp", rb_f_chomp, -1);
-    rb_define_global_function("chomp!", rb_f_chomp_bang, -1);
 
     rb_define_global_function("split", rb_f_split, -1);
     rb_define_global_function("scan", rb_f_scan, 1);

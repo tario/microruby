@@ -9,8 +9,8 @@ VPATH = $(srcdir)/missing
 CC = gcc
 YACC = bison -y
 PURIFY =
-OBJS = eval.o parse.o gc.o string.o error.o class.o variable.o hash.o st.o enumerator.o array.o object.o numeric.o bignum.o signal.o enum.o compar.o util.o sprintf.o re.o regex.o range.o random.o inits.o file.o time.o ruby.o struct.o  version.o prec.o main.o io.o
-CFLAGS = -g -O2
+OBJS = eval.o parse.o gc.o string.o error.o class.o variable.o hash.o st.o enumerator.o array.o object.o numeric.o bignum.o signal.o enum.o compar.o util.o sprintf.o re.o regex.o range.o random.o inits.o time.o ruby.o struct.o  version.o prec.o main.o
+CFLAGS = -g -O0
 LD = gcc
 LDADD = -lm -lrt
 

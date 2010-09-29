@@ -263,6 +263,23 @@ int ruby_safe_level = 0;
    4 - no global (non-tainted) variable modification/no direct output
 */
 
+void
+rb_write_error2(mesg, len)
+    const char *mesg;
+    long len;
+{
+    //TODO rb_io_write(rb_stderr, rb_str_new(mesg, len));
+}
+
+void
+rb_write_error(mesg)
+    const char *mesg;
+{
+    //TODO rb_write_error2(mesg, strlen(mesg));
+}
+
+
+
 static VALUE safe_getter _((void));
 static void safe_setter _((VALUE val));
 
@@ -4538,40 +4555,6 @@ rb_f_exit(argc, argv)
 }
 
 
-/*
- *  call-seq:
- *     abort
- *     Kernel::abort
- *     Process::abort
- *  
- *  Terminate execution immediately, effectively by calling
- *  <code>Kernel.exit(1)</code>. If _msg_ is given, it is written
- *  to STDERR prior to terminating.
- */
-
-VALUE
-rb_f_abort(argc, argv)
-    int argc;
-    VALUE *argv;
-{
-    rb_secure(4);
-    if (argc == 0) {
-	if (!NIL_P(ruby_errinfo)) {
-	    error_print();
-	}
-	rb_exit(EXIT_FAILURE);
-    }
-    else {
-	VALUE mesg;
-
-	rb_scan_args(argc, argv, "1", &mesg);
-	StringValue(mesg);
-	rb_io_puts(1, &mesg, rb_stderr);
-	terminate_process(EXIT_FAILURE, mesg);
-    }
-    return Qnil;		/* not reached */
-}
-
 void
 rb_iter_break()
 {
@@ -7146,75 +7129,6 @@ load_unlock(const char *ftptr)
     }
 }
 
-static int
-search_required(fname, featurep, path)
-    VALUE fname, *featurep, *path;
-{
-    VALUE tmp;
-    const char *ext, *ftptr;
-    int type;
-
-    *featurep = fname;
-    *path = 0;
-    ext = strrchr(ftptr = RSTRING_PTR(fname), '.');
-    if (ext && !strchr(ext, '/')) {
-	if (strcmp(".rb", ext) == 0) {
-	    if (rb_feature_p(ftptr, ext, Qtrue)) {
-		if (ftptr) *path = rb_str_new2(ftptr);
-		return 'r';
-	    }
-	    if ((*path = rb_find_file(fname)) != 0) return 'r';
-	    return 0;
-	}
-	else if (IS_SOEXT(ext)) {
-	    if (rb_feature_p(ftptr, ext, Qfalse)) {
-		if (ftptr) *path = rb_str_new2(ftptr);
-		return 's';
-	    }
-	    tmp = rb_str_new(RSTRING_PTR(fname), ext-RSTRING_PTR(fname));
-	    *featurep = tmp;
-#ifdef DLEXT2
-	    OBJ_FREEZE(tmp);
-	    if (rb_find_file_ext(&tmp, loadable_ext+1)) {
-		*featurep = tmp;
-		*path = rb_find_file(tmp);
-		return 's';
-	    }
-#else
-	    rb_str_cat2(tmp, DLEXT);
-	    OBJ_FREEZE(tmp);
-	    if ((*path = rb_find_file(tmp)) != 0) {
-		return 's';
-	    }
-#endif
-	}
-	else if (IS_DLEXT(ext)) {
-	    if (rb_feature_p(ftptr, ext, Qfalse)) {
-		if (ftptr) *path = rb_str_new2(ftptr);
-		return 's';
-	    }
-	    if ((*path = rb_find_file(fname)) != 0) return 's';
-	}
-    }
-    tmp = fname;
-    type = rb_find_file_ext(&tmp, loadable_ext);
-    *featurep = tmp;
-    switch (type) {
-      case 0:
-	type = rb_feature_p(ftptr, 0, Qfalse);
-	if (type && ftptr) *path = rb_str_new2(ftptr);
-	return type;
-
-      default:
-	ext = strrchr(ftptr = RSTRING(tmp)->ptr, '.');
-	if (!rb_feature_p(ftptr, ext, !--type))
-	    *path = rb_find_file(tmp);
-	else if (ftptr)
-	    *path = rb_str_new2(ftptr);
-    }
-    return type ? 's' : 'r';
-}
-
 static void
 load_failed(fname)
     VALUE fname;
@@ -7982,11 +7896,6 @@ Init_eval()
     rb_define_global_function("fail", rb_f_raise, -1);
 
     rb_define_global_function("caller", rb_f_caller, -1);
-
-    rb_define_global_function("exit", rb_f_exit, -1);
-    rb_define_global_function("abort", rb_f_abort, -1);
-
-    rb_define_global_function("at_exit", rb_f_at_exit, 0);
 
     rb_define_global_function("catch", rb_f_catch, 1);
     rb_define_global_function("throw", rb_f_throw, -1);
@@ -10632,25 +10541,6 @@ rb_thread_dead(th)
     rb_thread_t th;
 {
     return th->status == THREAD_KILLED;
-}
-
-void
-rb_thread_fd_close(fd)
-    int fd;
-{
-    rb_thread_t th;
-
-    FOREACH_THREAD(th) {
-	if (((th->wait_for & WAIT_FD) && fd == th->fd) ||
-	    ((th->wait_for & WAIT_SELECT) && (fd < th->fd) &&
-	     (FD_ISSET(fd, &th->readfds) ||
-	      FD_ISSET(fd, &th->writefds) ||
-	      FD_ISSET(fd, &th->exceptfds)))) {
-	    VALUE exc = rb_exc_new2(rb_eIOError, "stream closed");
-	    rb_thread_raise(1, &exc, th);
-	}
-    }
-    END_FOREACH(th);
 }
 
 NORETURN(static void rb_thread_main_jump _((VALUE, int)));

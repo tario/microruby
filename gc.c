@@ -1326,7 +1326,8 @@ obj_free(obj)
 	if (RANY(obj)->as.file.fptr) {
 	    struct rb_io_t *fptr = RANY(obj)->as.file.fptr;
 	    make_deferred(RANY(obj));
-	    RDATA(obj)->dfree = (void (*)(void*))rb_io_fptr_finalize;
+	    //RDATA(obj)->dfree = (void (*)(void*))rb_io_fptr_finalize;
+	    RDATA(obj)->dfree = 0;
 	    RDATA(obj)->data = fptr;
 	    return 1;
 	}
@@ -2028,7 +2029,7 @@ rb_gc_call_finalizer_at_exit()
 	    }
 	    else if (BUILTIN_TYPE(p) == T_FILE) {
 		p->as.free.flags = 0;
-		rb_io_fptr_finalize(RANY(p)->as.file.fptr);
+//		rb_io_fptr_finalize(RANY(p)->as.file.fptr);
 	    }
 	    p++;
 	}
