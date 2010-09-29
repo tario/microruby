@@ -72,7 +72,6 @@ rb_call_inits()
     Init_Time();
     Init_Random();
     Init_signal();
-    Init_process();
     Init_load();
     Init_Proc();
     Init_Binding();

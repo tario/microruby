@@ -3023,7 +3023,8 @@ rb_eval(self, n)
 	switch (state = EXEC_TAG()) {
 	  case 0:
 	  opt_n_next:
-	    while (!NIL_P(rb_gets())) {
+	    //while (!NIL_P(rb_gets())) { FIXME
+	    while(0) {
 	      opt_n_redo:
 		rb_eval(self, node->nd_body);
 	    }
@@ -10339,6 +10340,8 @@ extern VALUE *rb_gc_stack_start;
 #ifdef __ia64
 extern VALUE *rb_gc_register_stack_start;
 #endif
+
+VALUE rb_last_status;
 
 static void
 rb_thread_save_context(th)
