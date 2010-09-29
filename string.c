@@ -4485,37 +4485,6 @@ rb_str_oct(str)
 
 /*
  *  call-seq:
- *     str.crypt(other_str)   => new_str
- *  
- *  Applies a one-way cryptographic hash to <i>str</i> by invoking the standard
- *  library function <code>crypt</code>. The argument is the salt string, which
- *  should be two characters long, each character drawn from
- *  <code>[a-zA-Z0-9./]</code>.
- */
-
-static VALUE
-rb_str_crypt(str, salt)
-    VALUE str, salt;
-{
-    extern char *crypt _((const char *, const char*));
-    VALUE result;
-    const char *s;
-
-    StringValue(salt);
-    if (RSTRING(salt)->len < 2)
-	rb_raise(rb_eArgError, "salt too short(need >=2 bytes)");
-
-    if (RSTRING(str)->ptr) s = RSTRING(str)->ptr;
-    else s = "";
-    result = rb_str_new2(crypt(s, RSTRING(salt)->ptr));
-    OBJ_INFECT(result, str);
-    OBJ_INFECT(result, salt);
-    return result;
-}
-
-
-/*
- *  call-seq:
  *     str.intern   => symbol
  *     str.to_sym   => symbol
  *  
@@ -4984,7 +4953,6 @@ Init_String()
     rb_define_method(rb_cString, "reverse!", rb_str_reverse_bang, 0);
     rb_define_method(rb_cString, "concat", rb_str_concat, 1);
     rb_define_method(rb_cString, "<<", rb_str_concat, 1);
-    rb_define_method(rb_cString, "crypt", rb_str_crypt, 1);
     rb_define_method(rb_cString, "intern", rb_str_intern, 0);
     rb_define_method(rb_cString, "to_sym", rb_str_intern, 0);
 
