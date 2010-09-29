@@ -72,9 +72,6 @@
 #undef xfree
 
 # define RUBY
-extern int rb_prohibit_interrupt;
-extern int rb_trap_pending;
-void rb_trap_exec _((void));
 
 # define CHECK_INTS do {\
     if (!rb_prohibit_interrupt) {\
@@ -4339,7 +4336,6 @@ re_match_exec(bufp, string_arg, size, pos, beg, regs)
 	break;
       }
 #ifdef RUBY
-    CHECK_INTS;
 #endif
     continue;  /* Successfully executed one pattern command; keep going.  */
 

@@ -70,7 +70,6 @@ rb_call_inits()
     Init_Range();
     Init_Time();
     Init_Random();
-    Init_signal();
     Init_load();
     Init_Proc();
     Init_Binding();

@@ -149,7 +149,8 @@ ruby_xmalloc(size)
     RUBY_CRITICAL(mem = malloc(size));
     if (!mem) {
 	garbage_collect();
-	RUBY_CRITICAL(mem = malloc(size));
+	mem = malloc(size);
+	RUBY_CRITICAL();
 	if (!mem) {
 	    rb_memerror();
 	}
@@ -1502,7 +1503,6 @@ garbage_collect()
     rb_gc_mark_global_tbl();
 
     rb_mark_tbl(rb_class_tbl);
-    rb_gc_mark_trap_list();
 
     /* mark generic instance variables for special constants */
     rb_mark_generic_ivar_tbl();

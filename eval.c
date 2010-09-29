@@ -212,7 +212,6 @@ int _setjmp(), _longjmp();
 #endif
 
 #include <sys/types.h>
-#include <signal.h>
 #include <errno.h>
 
 #if defined(__VMS)
@@ -1436,7 +1435,6 @@ ruby_init()
 	_vmsruby_init();
 #endif
 	ruby_prog_init();
-	ALLOW_INTS;
     }
     POP_TAG();
     if (state) {
@@ -1569,138 +1567,6 @@ ruby_options(argc, argv)
 }
 
 void rb_exec_end_proc _((void));
-
-static void
-ruby_finalize_0()
-{
-    PUSH_TAG(PROT_NONE);
-    if (EXEC_TAG() == 0) {
-	rb_trap_exit();
-    }
-    POP_TAG();
-    rb_exec_end_proc();
-}
-
-static void
-ruby_finalize_1()
-{
-    signal(SIGINT, SIG_DFL);
-    ruby_errinfo = 0;
-    rb_gc_call_finalizer_at_exit();
-    trace_func = 0;
-    tracing = 0;
-}
-
-void
-ruby_finalize()
-{
-    ruby_finalize_0();
-    ruby_finalize_1();
-}
-
-int
-ruby_cleanup(ex)
-    int ex;
-{
-    int state;
-    volatile VALUE errs[2];
-    int nerr;
-
-    errs[1] = ruby_errinfo;
-    ruby_safe_level = 0;
-    Init_stack((void *)&state);
-    ruby_finalize_0();
-    errs[0] = ruby_errinfo;
-    PUSH_TAG(PROT_NONE);
-    PUSH_ITER(ITER_NOT);
-    if ((state = EXEC_TAG()) == 0) {
-	rb_thread_cleanup();
-	rb_thread_wait_other_threads();
-    }
-    else if (ex == 0) {
-	ex = state;
-    }
-    POP_ITER();
-    ruby_errinfo = errs[1];
-    ex = error_handle(ex);
-    ruby_finalize_1();
-    POP_TAG();
-
-    for (nerr = 0; nerr < sizeof(errs) / sizeof(errs[0]); ++nerr) {
-	VALUE err = errs[nerr];
-
-	if (!RTEST(err)) continue;
-
-	if (rb_obj_is_kind_of(err, rb_eSystemExit)) {
-	    return sysexit_status(err);
-	}
-	else if (rb_obj_is_kind_of(err, rb_eSignal)) {
-	    VALUE sig = rb_iv_get(err, "signo");
-	    ruby_default_signal(NUM2INT(sig));
-	}
-	else if (ex == 0) {
-	    ex = 1;
-	}
-    }
-
-#if EXIT_SUCCESS != 0 || EXIT_FAILURE != 1
-    switch (ex) {
-#if EXIT_SUCCESS != 0
-      case 0: return EXIT_SUCCESS;
-#endif
-#if EXIT_FAILURE != 1
-      case 1: return EXIT_FAILURE;
-#endif
-    }
-#endif
-
-    return ex;
-}
-
-static int
-ruby_exec_internal()
-{
-    int state;
-
-    PUSH_TAG(PROT_NONE);
-    PUSH_ITER(ITER_NOT);
-    /* default visibility is private at toplevel */
-    SCOPE_SET(SCOPE_PRIVATE);
-    if ((state = EXEC_TAG()) == 0) {
-	eval_node(ruby_top_self, ruby_eval_tree);
-    }
-    POP_ITER();
-    POP_TAG();
-    return state;
-}
-
-void
-ruby_stop(ex)
-    int ex;
-{
-    exit(ruby_cleanup(ex));
-}
-
-int
-ruby_exec()
-{
-    volatile NODE *tmp;
-
-    Init_stack((void*)&tmp);
-    return ruby_exec_internal();
-}
-
-void
-ruby_run()
-{
-    int state;
-    static int ex;
-
-    if (ruby_nerrs > 0) exit(EXIT_FAILURE);
-    state = ruby_exec();
-    if (state && !ex) ex = state;
-    ruby_stop(ex);
-}
 
 static void
 compile_error(at)
@@ -3289,17 +3155,14 @@ rb_eval(self, n)
 	break;
 
       case NODE_NEXT:
-	CHECK_INTS;
 	next_jump(rb_eval(self, node->nd_stts));
 	break;
 
       case NODE_REDO:
-	CHECK_INTS;
 	JUMP_TAG(TAG_REDO);
 	break;
 
       case NODE_RETRY:
-	CHECK_INTS;
 	JUMP_TAG(TAG_RETRY);
 	break;
 
@@ -4187,7 +4050,6 @@ rb_eval(self, n)
 	unknown_node(node);
     }
   finish:
-    CHECK_INTS;
     if (contnode) {
 	node = contnode;
 	contnode = 0;
@@ -4473,89 +4335,6 @@ terminate_process(status, mesg)
 }
 
 void
-rb_exit(status)
-    int status;
-{
-    if (prot_tag) {
-	terminate_process(status, rb_str_new("exit", 4));
-    }
-    ruby_finalize();
-    exit(status);
-}
-
-
-/*
- *  call-seq:
- *     exit(integer=0)
- *     Kernel::exit(integer=0)
- *     Process::exit(integer=0)
- *  
- *  Initiates the termination of the Ruby script by raising the
- *  <code>SystemExit</code> exception. This exception may be caught. The
- *  optional parameter is used to return a status code to the invoking
- *  environment.
- *     
- *     begin
- *       exit
- *       puts "never get here"
- *     rescue SystemExit
- *       puts "rescued a SystemExit exception"
- *     end
- *     puts "after begin block"
- *     
- *  <em>produces:</em>
- *     
- *     rescued a SystemExit exception
- *     after begin block
- *     
- *  Just prior to termination, Ruby executes any <code>at_exit</code> functions
- *  (see Kernel::at_exit) and runs any object finalizers (see
- *  ObjectSpace::define_finalizer).
- *     
- *     at_exit { puts "at_exit function" }
- *     ObjectSpace.define_finalizer("string",  proc { puts "in finalizer" })
- *     exit
- *     
- *  <em>produces:</em>
- *     
- *     at_exit function
- *     in finalizer
- */
-
-VALUE
-rb_f_exit(argc, argv)
-    int argc;
-    VALUE *argv;
-{
-    VALUE status;
-    int istatus;
-
-    rb_secure(4);
-    if (rb_scan_args(argc, argv, "01", &status) == 1) {
-	switch (status) {
-	  case Qtrue:
-	    istatus = EXIT_SUCCESS;
-	    break;
-	  case Qfalse:
-	    istatus = EXIT_FAILURE;
-	    break;
-	  default:
-	    istatus = NUM2INT(status);
-#if EXIT_SUCCESS != 0
-	    if (istatus == 0) istatus = EXIT_SUCCESS;
-#endif
-	    break;
-	}
-    }
-    else {
-	istatus = EXIT_SUCCESS;
-    }
-    rb_exit(istatus);
-    return Qnil;		/* not reached */
-}
-
-
-void
 rb_iter_break()
 {
     break_jump(Qnil);
@@ -4619,7 +4398,6 @@ rb_longjmp(tag, mesg)
 	}
     }
 
-    rb_trap_restore_mask();
     if (tag != TAG_FATAL) {
 	EXEC_EVENT_HOOK(RUBY_EVENT_RAISE, ruby_current_node,
 			ruby_frame->self,
@@ -5082,7 +4860,6 @@ rb_yield_0(val, self, klass, flags, avalue)
 	switch (state) {
 	  case TAG_REDO:
 	    state = 0;
-	    CHECK_INTS;
 	    goto redo;
 	  case TAG_NEXT:
 	    if (!lambda) {
@@ -5208,7 +4985,6 @@ loop_i()
 {
     for (;;) {
 	rb_yield_0(Qundef, 0, 0, 0, Qfalse);
-	CHECK_INTS;
     }
     return Qnil;
 }
@@ -5571,7 +5347,6 @@ rb_with_disable_interrupt(proc, data)
     VALUE result = Qnil;	/* OK */
     int status;
 
-    DEFER_INTS;
     {
 	int thr_critical = rb_thread_critical;
 
@@ -5583,7 +5358,6 @@ rb_with_disable_interrupt(proc, data)
 	POP_TAG();
 	rb_thread_critical = thr_critical;
     }
-    ENABLE_INTS;
     if (status) JUMP_TAG(status);
 
     return result;
@@ -5605,7 +5379,6 @@ eval_check_tick()
 {
     static int tick;
     if ((++tick & 0xff) == 0) {
-	CHECK_INTS;		/* better than nothing */
 	stack_check();
 	rb_gc_finalize_deferred();
     }
@@ -9996,7 +9769,6 @@ rb_trap_eval(cmd, sig, safe)
     THREAD_COPY_STATUS(&save, curr_thread);
 
     if (state) {
-	rb_trap_immediate = 0;
 	rb_thread_ready(curr_thread);
 	JUMP_TAG(state);
     }
@@ -10299,7 +10071,8 @@ rb_thread_save_context(th)
     th->dyna_vars = ruby_dyna_vars;
     th->block = ruby_block;
     th->flags &= THREAD_FLAGS_MASK;
-    th->flags |= (rb_trap_immediate<<8) | scope_vmode;
+    //TODO
+    th->flags |= (0<<8) | scope_vmode;
     th->iter = ruby_iter;
     th->tag = prot_tag;
     th->tracing = tracing;
@@ -10323,7 +10096,6 @@ static int
 rb_thread_switch(n)
     int n;
 {
-    rb_trap_immediate = (curr_thread->flags&0x100)?1:0;
     switch (n) {
       case 0:
 	return 0;
@@ -10373,7 +10145,6 @@ rb_thread_restore_context_0(rb_thread_t th, int exit)
     static int ex;
     static VALUE tval;
 
-    rb_trap_immediate = 0;	/* inhibit interrupts from here */
     if (ruby_sandbox_restore != NULL) {
 	ruby_sandbox_restore(th);
     }
@@ -10757,7 +10528,6 @@ rb_thread_schedule()
 	if (n < 0) {
 	    int e = errno;
 
-	    if (rb_trap_pending) rb_trap_exec();
 	    if (e == EINTR) goto again;
 #ifdef ERESTART
 	    if (e == ERESTART) goto again;
@@ -10897,9 +10667,7 @@ rb_thread_schedule()
 	/* raise fatal error to main thread */
 	curr_thread->node = ruby_current_node;
 	if (curr->next == curr) {
-	    TRAP_BEG;
 	    pause();
-	    TRAP_END;
 	}
 	FOREACH_THREAD_FROM(curr, th) {
             int wait_for = th->wait_for & ~WAIT_DONE;
@@ -11000,10 +10768,8 @@ rb_thread_wait_for(time)
 #endif
 	for (;;) {
 	    rb_thread_critical = Qtrue;
-	    TRAP_BEG;
 	    n = select(0, 0, 0, 0, &time);
 	    rb_thread_critical = thr_critical;
-	    TRAP_END;
 	    if (n == 0) return;
 	    if (n < 0) {
 		switch (errno) {
@@ -11086,9 +10852,7 @@ rb_thread_select(max, read, write, except, timeout)
 	struct timeval *const tvp = timeout;
 #endif
 	for (;;) {
-	    TRAP_BEG;
 	    n = select(max, read, write, except, tvp);
-	    TRAP_END;
 	    if (n < 0) {
 		switch (errno) {
 		  case EINTR:
@@ -11394,109 +11158,6 @@ rb_thread_run(thread)
     return thread;
 }
 
-
-static void
-rb_kill_thread(th, flags)
-    rb_thread_t th;
-    int flags;
-{
-    if (th != curr_thread && th->safe < 4) {
-	rb_secure(4);
-    }
-    if (th->status == THREAD_TO_KILL || th->status == THREAD_KILLED)
-	return;
-    if (th == th->next || th == main_thread) rb_exit(EXIT_SUCCESS);
-
-    rb_thread_ready(th);
-    th->flags |= flags;
-    th->status = THREAD_TO_KILL;
-    if (!rb_thread_critical) rb_thread_schedule();
-}
-
-
-/*
- *  call-seq:
- *     thr.exit        => thr
- *     thr.kill        => thr
- *     thr.terminate   => thr
- *  
- *  Terminates <i>thr</i> and schedules another thread to be run, returning
- *  the terminated <code>Thread</code>.  If this is the main thread, or the
- *  last thread, exits the process.
- */
-
-VALUE
-rb_thread_kill(thread)
-    VALUE thread;
-{
-    rb_thread_t th = rb_thread_check(thread);
-
-    rb_kill_thread(th, 0);
-    return thread;
-}
-
-
-/*
- *  call-seq:
- *     thr.exit!        => thr
- *     thr.kill!        => thr
- *     thr.terminate!   => thr
- *  
- *  Terminates <i>thr</i> without calling ensure clauses and schedules
- *  another thread to be run, returning the terminated <code>Thread</code>.
- *  If this is the main thread, or the last thread, exits the process.
- *
- *  See <code>Thread#exit</code> for the safer version.
- */
-
-static VALUE
-rb_thread_kill_bang(thread)
-    VALUE thread;
-{
-    rb_thread_t th = rb_thread_check(thread);
-    rb_kill_thread(th, THREAD_NO_ENSURE);
-    return thread;
-}
-
-/*
- *  call-seq:
- *     Thread.kill(thread)   => thread
- *  
- *  Causes the given <em>thread</em> to exit (see <code>Thread::exit</code>).
- *     
- *     count = 0
- *     a = Thread.new { loop { count += 1 } }
- *     sleep(0.1)       #=> 0
- *     Thread.kill(a)   #=> #<Thread:0x401b3d30 dead>
- *     count            #=> 93947
- *     a.alive?         #=> false
- */
-
-static VALUE
-rb_thread_s_kill(obj, th)
-    VALUE obj, th;
-{
-    return rb_thread_kill(th);
-}
-
-
-/*
- *  call-seq:
- *     Thread.exit   => thread
- *  
- *  Terminates the currently running thread and schedules another thread to be
- *  run. If this thread is already marked to be killed, <code>exit</code>
- *  returns the <code>Thread</code>. If this is the main thread, or the last
- *  thread, exit the process.
- */
-
-static VALUE
-rb_thread_exit()
-{
-    return rb_thread_kill(curr_thread->thread);
-}
-
-
 /*
  *  call-seq:
  *     Thread.pass   => nil
@@ -11580,9 +11241,7 @@ rb_thread_sleep(sec)
     int sec;
 {
     if (curr_thread == curr_thread->next) {
-	TRAP_BEG;
 	sleep(sec);
-	TRAP_END;
 	return;
     }
     rb_thread_wait_for(rb_time_timeval(INT2FIX(sec)));
@@ -11595,10 +11254,8 @@ rb_thread_sleep_forever()
     if (curr_thread == curr_thread->next ||
 	curr_thread->status == THREAD_TO_KILL) {
 	rb_thread_critical = Qtrue;
-	TRAP_BEG;
 	pause();
 	rb_thread_critical = thr_critical;
-	TRAP_END;
 	return;
     }
 
@@ -11880,12 +11537,6 @@ rb_thread_alloc(klass)
 
 static int thread_init;
 
-#if defined(POSIX_SIGNAL)
-#define CATCH_VTALRM() posix_signal(SIGVTALRM, catch_timer)
-#else
-#define CATCH_VTALRM() signal(SIGVTALRM, catch_timer)
-#endif
-
 #if defined(_THREAD_SAFE)
 static void
 catch_timer(sig)
@@ -11951,9 +11602,6 @@ thread_timer(dummy)
     while ((err = WAIT_FOR_10MS()) == EINTR || err == ETIMEDOUT) {
 	if (!rb_thread_critical) {
 	    rb_thread_pending = 1;
-	    if (rb_trap_immediate) {
-		pthread_kill(ruby_thid, SIGVTALRM);
-	    }
 	}
     }
 
@@ -11970,7 +11618,6 @@ rb_thread_start_timer()
 
     if (thread_init) return;
     if (rb_thread_alone()) return;
-    CATCH_VTALRM();
     args[0] = &time_thread;
     args[1] = &start;
     safe_mutex_lock(&time_thread.lock);
@@ -12013,7 +11660,6 @@ rb_thread_start_timer()
 
     if (thread_init) return;
     if (rb_thread_alone()) return;
-    CATCH_VTALRM();
     tval.it_interval.tv_sec = 0;
     tval.it_interval.tv_usec = 10000;
     tval.it_value = tval.it_interval;
@@ -12101,7 +11747,6 @@ rb_thread_start_0(fn, arg, th)
     POP_TAG();
     status = th->status;
 
-    if (th == main_thread) ruby_stop(state);
     rb_thread_remove(th);
 
     if (saved_block) {
@@ -12137,7 +11782,6 @@ rb_thread_start_0(fn, arg, th)
 	}
     }
     rb_thread_schedule();
-    ruby_stop(0);		/* last thread termination */
     return 0;			/* not reached */
 }
 
@@ -12528,27 +12172,6 @@ rb_thread_trap_eval(cmd, sig, safe)
     rb_thread_restore_context(curr_thread, RESTORE_TRAP);
 }
 
-void
-rb_thread_signal_exit()
-{
-    VALUE args[2];
-
-    rb_thread_critical = 0;
-    if (curr_thread == main_thread) {
-	rb_thread_ready(curr_thread);
-	rb_exit(EXIT_SUCCESS);
-    }
-    args[0] = INT2NUM(EXIT_SUCCESS);
-    args[1] = rb_str_new2("exit");
-    rb_thread_ready(main_thread);
-    if (!rb_thread_dead(curr_thread)) {
-	if (THREAD_SAVE_CONTEXT(curr_thread)) {
-	    return;
-	}
-    }
-    rb_thread_main_jump(rb_class_new_instance(2, args, rb_eSystemExit), 
-			RESTORE_EXIT);
-}
 
 static VALUE
 rb_thread_raise(argc, argv, th)
@@ -13294,9 +12917,6 @@ Init_Thread()
     rb_define_singleton_method(rb_cThread, "start", rb_thread_start, -2);
     rb_define_singleton_method(rb_cThread, "fork", rb_thread_start, -2);
 
-    rb_define_singleton_method(rb_cThread, "stop", rb_thread_stop, 0);
-    rb_define_singleton_method(rb_cThread, "kill", rb_thread_s_kill, 1);
-    rb_define_singleton_method(rb_cThread, "exit", rb_thread_exit, 0);
     rb_define_singleton_method(rb_cThread, "pass", rb_thread_pass, 0);
     rb_define_singleton_method(rb_cThread, "current", rb_thread_current, 0);
     rb_define_singleton_method(rb_cThread, "main", rb_thread_main, 0);
@@ -13310,12 +12930,6 @@ Init_Thread()
 
     rb_define_method(rb_cThread, "run", rb_thread_run, 0);
     rb_define_method(rb_cThread, "wakeup", rb_thread_wakeup, 0);
-    rb_define_method(rb_cThread, "kill", rb_thread_kill, 0);
-    rb_define_method(rb_cThread, "terminate", rb_thread_kill, 0);
-    rb_define_method(rb_cThread, "exit", rb_thread_kill, 0);
-    rb_define_method(rb_cThread, "kill!", rb_thread_kill_bang, 0);
-    rb_define_method(rb_cThread, "terminate!", rb_thread_kill_bang, 0);
-    rb_define_method(rb_cThread, "exit!", rb_thread_kill_bang, 0);
     rb_define_method(rb_cThread, "value", rb_thread_value, 0);
     rb_define_method(rb_cThread, "status", rb_thread_status, 0);
     rb_define_method(rb_cThread, "join", rb_thread_join_m, -1);
@@ -13469,7 +13083,6 @@ rb_f_throw(argc, argv)
     if (!tt) {
 	rb_name_error(SYM2ID(tag), "uncaught throw `%s'", rb_id2name(SYM2ID(tag)));
     }
-    rb_trap_restore_mask();
     JUMP_TAG(TAG_THROW);
 #ifndef __GNUC__
     return Qnil; 		/* not reached */
