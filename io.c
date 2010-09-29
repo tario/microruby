@@ -3152,264 +3152,6 @@ rb_io_unbuffered(fptr)
     rb_io_synchronized(fptr);
 }
 
-static VALUE pipe_open(VALUE pstr, const char *pname, const char *mode);
-
-static VALUE
-pipe_open(pstr, pname, mode)
-    VALUE pstr;
-    const char *pname, *mode;
-{
-    int modef = rb_io_mode_flags(mode);
-    rb_io_t *fptr;
-#if defined(DJGPP) || defined(__human68k__) || defined(__VMS)
-    FILE *f;
-#else
-    int pid;
-#ifdef _WIN32
-    FILE *fpr, *fpw;
-#else
-    int pr[2], pw[2];
-#endif
-#endif
-    volatile int doexec;
-
-    if (!pname) pname = StringValueCStr(pstr);
-    doexec = (strcmp("-", pname) != 0);
-
-#if defined(DJGPP) || defined(__human68k__) || defined(__VMS) || defined(_WIN32)
-    if (!doexec) {
-	rb_raise(rb_eNotImpError,
-		 "fork() function is unimplemented on this machine");
-    }
-#endif
-
-#if defined(DJGPP) || defined(__human68k__) || defined(__VMS)
-    f = popen(pname, mode);
-    
-    if (!f) rb_sys_fail(pname);
-    else {
-	VALUE port = io_alloc(rb_cIO);
-
-	MakeOpenFile(port, fptr);
-	fptr->finalize = pipe_finalize;
-	fptr->mode = modef;
-
-	pipe_add_fptr(fptr);
-	if (modef & FMODE_READABLE) fptr->f  = f;
-	if (modef & FMODE_WRITABLE) {
-	    if (fptr->f) fptr->f2 = f;
-	    else fptr->f = f;
-	    rb_io_synchronized(fptr);
-	}
-	return (VALUE)port;
-    }
-#else
-#ifdef _WIN32
-retry:
-    pid = pipe_exec(pname, rb_io_mode_modenum(mode), &fpr, &fpw);
-    if (pid == -1) {		/* exec failed */
-	if (errno == EAGAIN) {
-	    rb_thread_sleep(1);
-	    goto retry;
-	}
-	rb_sys_fail(pname);
-    }
-    else {
-        VALUE port = io_alloc(rb_cIO);
-
-	MakeOpenFile(port, fptr);
-	fptr->mode = modef;
-	fptr->mode |= FMODE_SYNC;
-	fptr->pid = pid;
-
-	if (modef & FMODE_READABLE) {
-	    fptr->f = fpr;
-	}
-	if (modef & FMODE_WRITABLE) {
-	    if (fptr->f) fptr->f2 = fpw;
-	    else fptr->f = fpw;
-	}
-	fptr->finalize = pipe_finalize;
-	pipe_add_fptr(fptr);
-	return (VALUE)port;
-    }
-#else
-    if (((modef & FMODE_READABLE) && pipe(pr) == -1) ||
-	((modef & FMODE_WRITABLE) && pipe(pw) == -1))
-	rb_sys_fail(pname);
-
-    if (!doexec) {
-	fflush(stdin);		/* is it really needed? */
-	fflush(stdout);
-	fflush(stderr);
-    }
-
-  retry:
-    switch ((pid = fork())) {
-      case 0:			/* child */
-	if (modef & FMODE_READABLE) {
-	    close(pr[0]);
-	    if (pr[1] != 1) {
-		dup2(pr[1], 1);
-		close(pr[1]);
-	    }
-	}
-	if (modef & FMODE_WRITABLE) {
-	    close(pw[1]);
-	    if (pw[0] != 0) {
-		dup2(pw[0], 0);
-		close(pw[0]);
-	    }
-	}
-
-	if (doexec) {
-	    int fd;
-
-	    for (fd = 3; fd < NOFILE; fd++)
-		close(fd);
-	    rb_proc_exec(pname);
-	    fprintf(stderr, "%s:%d: command not found: %s\n",
-		    ruby_sourcefile, ruby_sourceline, pname);
-	    _exit(127);
-	}
-	rb_io_synchronized(RFILE(orig_stdout)->fptr);
-	rb_io_synchronized(RFILE(orig_stderr)->fptr);
-	return Qnil;
-
-      case -1:			/* fork failed */
-	if (errno == EAGAIN) {
-	    rb_thread_sleep(1);
-	    goto retry;
-	}
-	else {
-	    int e = errno;
-	    if ((modef & FMODE_READABLE)) {
-		close(pr[0]);
-		close(pr[1]);
-	    }
-	    if ((modef & FMODE_WRITABLE)) {
-		close(pw[0]);
-		close(pw[1]);
-	    }
-	    errno = e;
-	    rb_sys_fail(pname);
-	}
-	break;
-
-      default:			/* parent */
-	if (pid < 0) rb_sys_fail(pname);
-	else {
-	    VALUE port = io_alloc(rb_cIO);
-
-	    MakeOpenFile(port, fptr);
-	    fptr->mode = modef;
-	    fptr->mode |= FMODE_SYNC;
-	    fptr->pid = pid;
-
-	    if (modef & FMODE_READABLE) {
-		close(pr[1]);
-		fptr->f  = rb_fdopen(pr[0], "r");
-	    }
-	    if (modef & FMODE_WRITABLE) {
-		FILE *f = rb_fdopen(pw[1], "w");
-
-		close(pw[0]);
-		if (fptr->f) fptr->f2 = f;
-		else fptr->f = f;
-	    }
-#if defined (__CYGWIN__)
-	    fptr->finalize = pipe_finalize;
-	    pipe_add_fptr(fptr);
-#endif
-	    return port;
-	}
-    }
-#endif
-#endif
-}
-
-/*
- *  call-seq:
- *     IO.popen(cmd_string, mode="r" )               => io
- *     IO.popen(cmd_string, mode="r" ) {|io| block } => obj
- *  
- *  Runs the specified command string as a subprocess; the subprocess's
- *  standard input and output will be connected to the returned
- *  <code>IO</code> object. If <i>cmd_string</i> starts with a
- *  ``<code>-</code>'', then a new instance of Ruby is started as the
- *  subprocess. The default mode for the new file object is ``r'', but
- *  <i>mode</i> may be set to any of the modes listed in the description
- *  for class IO.
- *     
- *  If a block is given, Ruby will run the command as a child connected
- *  to Ruby with a pipe. Ruby's end of the pipe will be passed as a
- *  parameter to the block.
- *  At the end of block, Ruby close the pipe and sets <code>$?</code>.
- *  In this case <code>IO::popen</code> returns
- *  the value of the block.
- *     
- *  If a block is given with a <i>cmd_string</i> of ``<code>-</code>'',
- *  the block will be run in two separate processes: once in the parent,
- *  and once in a child. The parent process will be passed the pipe
- *  object as a parameter to the block, the child version of the block
- *  will be passed <code>nil</code>, and the child's standard in and
- *  standard out will be connected to the parent through the pipe. Not
- *  available on all platforms.
- *     
- *     f = IO.popen("uname")
- *     p f.readlines
- *     puts "Parent is #{Process.pid}"
- *     IO.popen ("date") { |f| puts f.gets }
- *     IO.popen("-") {|f| $stderr.puts "#{Process.pid} is here, f is #{f}"}
- *     p $?
- *     
- *  <em>produces:</em>
- *     
- *     ["Linux\n"]
- *     Parent is 26166
- *     Wed Apr  9 08:53:52 CDT 2003
- *     26169 is here, f is
- *     26166 is here, f is #<IO:0x401b3d44>
- *     #<Process::Status: pid=26166,exited(0)>
- */
-
-static VALUE
-rb_io_s_popen(argc, argv, klass)
-    int argc;
-    VALUE *argv;
-    VALUE klass;
-{
-    const char *mode;
-    VALUE pname, pmode, port;
-
-    if (rb_scan_args(argc, argv, "11", &pname, &pmode) == 1) {
-	mode = "r";
-    }
-    else if (FIXNUM_P(pmode)) {
-	mode = rb_io_modenum_mode(FIX2INT(pmode));
-    }
-    else {
-	mode = rb_io_flags_mode(rb_io_mode_flags(StringValueCStr(pmode)));
-    }
-    SafeStringValue(pname);
-    port = pipe_open(pname, 0, mode);
-    if (NIL_P(port)) {
-	/* child */
-	if (rb_block_given_p()) {
-	    rb_yield(Qnil);
-	    fflush(stdout);
-	    fflush(stderr);
-	    _exit(0);
-	}
-	return Qnil;
-    }
-    RBASIC(port)->klass = klass;
-    if (rb_block_given_p()) {
-	return rb_ensure(rb_yield, port, io_close, port);
-    }
-    return port;
-}
-
 static VALUE
 rb_open_file(argc, argv, io)
     int argc;
@@ -3509,118 +3251,6 @@ rb_io_s_sysopen(argc, argv)
     strcpy(path, RSTRING(fname)->ptr);
     fd = rb_sysopen(path, flags, fmode);
     return INT2NUM(fd);
-}
-
-/*
- *  call-seq:
- *     open(path [, mode [, perm]] )                => io or nil
- *     open(path [, mode [, perm]] ) {|io| block }  => obj
- *  
- *  Creates an <code>IO</code> object connected to the given stream,
- *  file, or subprocess.
- *     
- *  If <i>path</i> does not start with a pipe character
- *  (``<code>|</code>''), treat it as the name of a file to open using
- *  the specified mode (defaulting to ``<code>r</code>''). (See the table
- *  of valid modes on page 331.) If a file is being created, its initial
- *  permissions may be set using the integer third parameter.
- *     
- *  If a block is specified, it will be invoked with the
- *  <code>File</code> object as a parameter, and the file will be
- *  automatically closed when the block terminates. The call
- *  returns the value of the block.
- *     
- *  If <i>path</i> starts with a pipe character, a subprocess is
- *  created, connected to the caller by a pair of pipes. The returned
- *  <code>IO</code> object may be used to write to the standard input
- *  and read from the standard output of this subprocess. If the command
- *  following the ``<code>|</code>'' is a single minus sign, Ruby forks,
- *  and this subprocess is connected to the parent. In the subprocess,
- *  the <code>open</code> call returns <code>nil</code>. If the command
- *  is not ``<code>-</code>'', the subprocess runs the command. If a
- *  block is associated with an <code>open("|-")</code> call, that block
- *  will be run twice---once in the parent and once in the child. The
- *  block parameter will be an <code>IO</code> object in the parent and
- *  <code>nil</code> in the child. The parent's <code>IO</code> object
- *  will be connected to the child's <code>$stdin</code> and
- *  <code>$stdout</code>. The subprocess will be terminated at the end
- *  of the block.
- *     
- *     open("testfile") do |f|
- *       print f.gets
- *     end
- *     
- *  <em>produces:</em>
- *     
- *     This is line one
- *     
- *  Open a subprocess and read its output:
- *     
- *     cmd = open("|date")
- *     print cmd.gets
- *     cmd.close
- *     
- *  <em>produces:</em>
- *     
- *     Wed Apr  9 08:56:31 CDT 2003
- *     
- *  Open a subprocess running the same Ruby program:
- *     
- *     f = open("|-", "w+")
- *     if f == nil
- *       puts "in Child"
- *       exit
- *     else
- *       puts "Got: #{f.gets}"
- *     end
- *     
- *  <em>produces:</em>
- *     
- *     Got: in Child
- *     
- *  Open a subprocess using a block to receive the I/O object:
- *     
- *     open("|-") do |f|
- *       if f == nil
- *         puts "in Child"
- *       else
- *         puts "Got: #{f.gets}"
- *       end
- *     end
- *     
- *  <em>produces:</em>
- *     
- *     Got: in Child
- */
-
-static VALUE
-rb_f_open(argc, argv)
-    int argc;
-    VALUE *argv;
-{
-    if (argc >= 1) {
-	char *str = StringValuePtr(argv[0]);
-
-	if (str[0] == '|') {
-	    VALUE tmp = rb_str_new(str+1, RSTRING(argv[0])->len-1);
-	    OBJ_INFECT(tmp, argv[0]);
-	    argv[0] = tmp;
-	    return rb_io_s_popen(argc, argv, rb_cIO);
-	}
-    }
-    return rb_io_s_open(argc, argv, rb_cFile);
-}
-
-static VALUE
-rb_io_open(fname, mode)
-    char *fname, *mode;
-{
-    if (fname[0] == '|') {
-	return pipe_open(0, fname+1, mode);
-    }
-    else {
-	return rb_file_open(fname, mode);
-    }
 }
 
 static VALUE
@@ -4802,38 +4432,6 @@ rb_f_readlines(argc, argv)
     return ary;
 }
 
-/*
- *  call-seq:
- *     `cmd`    => string
- *  
- *  Returns the standard output of running _cmd_ in a subshell.
- *  The built-in syntax <code>%x{...}</code> uses
- *  this method. Sets <code>$?</code> to the process status.
- *     
- *     `date`                   #=> "Wed Apr  9 08:56:30 CDT 2003\n"
- *     `ls testdir`.split[1]    #=> "main.rb"
- *     `echo oops && exit 99`   #=> "oops\n"
- *     $?.exitstatus            #=> 99
- */
-
-static VALUE
-rb_f_backquote(obj, str)
-    VALUE obj, str;
-{
-    volatile VALUE port;
-    VALUE result;
-    rb_io_t *fptr;
-
-    SafeStringValue(str);
-    port = pipe_open(str, 0, "r");
-    if (NIL_P(port)) return rb_str_new(0,0);
-
-    GetOpenFile(port, fptr);
-    result = read_all(fptr, remain_size(fptr), Qnil);
-    rb_io_close(port);
-
-    return result;
-}
 
 #ifdef HAVE_SYS_SELECT_H
 #include <sys/select.h>
@@ -5375,48 +4973,6 @@ io_s_foreach(arg)
     return Qnil;
 }
 
-/*
- *  call-seq:
- *     IO.foreach(name, sep_string=$/) {|line| block }   => nil
- *  
- *  Executes the block for every line in the named I/O port, where lines
- *  are separated by <em>sep_string</em>.
- *     
- *     IO.foreach("testfile") {|x| print "GOT ", x }
- *     
- *  <em>produces:</em>
- *     
- *     GOT This is line one
- *     GOT This is line two
- *     GOT This is line three
- *     GOT And so on...
- */     
-
-static VALUE
-rb_io_s_foreach(argc, argv, self)
-    int argc;
-    VALUE *argv;
-    VALUE self;
-{
-    VALUE fname;
-    struct foreach_arg arg;
-
-    rb_scan_args(argc, argv, "11", &fname, &arg.sep);
-    RETURN_ENUMERATOR(self, argc, argv);
-    SafeStringValue(fname);
-
-    if (argc == 1) {
-	arg.sep = rb_default_rs;
-    }
-    else if (!NIL_P(arg.sep)) {
-	StringValue(arg.sep);
-    }
-    arg.io = rb_io_open(StringValueCStr(fname), "r");
-    if (NIL_P(arg.io)) return Qnil;
-
-    return rb_ensure(io_s_foreach, (VALUE)&arg, rb_io_close, arg.io);
-}
-
 static VALUE
 io_s_readlines(arg)
     struct foreach_arg *arg;
@@ -5424,76 +4980,11 @@ io_s_readlines(arg)
     return rb_io_readlines(arg->argc, &arg->sep, arg->io);
 }
 
-/*
- *  call-seq:
- *     IO.readlines(name, sep_string=$/)   => array
- *  
- *  Reads the entire file specified by <i>name</i> as individual
- *  lines, and returns those lines in an array. Lines are separated by
- *  <i>sep_string</i>.
- *     
- *     a = IO.readlines("testfile")
- *     a[0]   #=> "This is line one\n"
- *     
- */
-
-static VALUE
-rb_io_s_readlines(argc, argv, io)
-    int argc;
-    VALUE *argv;
-    VALUE io;
-{
-    VALUE fname;
-    struct foreach_arg arg;
-
-    rb_scan_args(argc, argv, "11", &fname, &arg.sep);
-    SafeStringValue(fname);
-
-    arg.argc = argc - 1;
-    arg.io = rb_io_open(StringValueCStr(fname), "r");
-    if (NIL_P(arg.io)) return Qnil;
-    return rb_ensure(io_s_readlines, (VALUE)&arg, rb_io_close, arg.io);
-}
-
 static VALUE
 io_s_read(arg)
     struct foreach_arg *arg;
 {
     return io_read(arg->argc, &arg->sep, arg->io);
-}
-
-/*
- *  call-seq:
- *     IO.read(name, [length [, offset]] )   => string
- *  
- *  Opens the file, optionally seeks to the given offset, then returns
- *  <i>length</i> bytes (defaulting to the rest of the file).
- *  <code>read</code> ensures the file is closed before returning.
- *     
- *     IO.read("testfile")           #=> "This is line one\nThis is line two\nThis is line three\nAnd so on...\n"
- *     IO.read("testfile", 20)       #=> "This is line one\nThi"
- *     IO.read("testfile", 20, 10)   #=> "ne one\nThis is line "
- */
-
-static VALUE
-rb_io_s_read(argc, argv, io)
-    int argc;
-    VALUE *argv;
-    VALUE io;
-{
-    VALUE fname, offset;
-    struct foreach_arg arg;
-
-    rb_scan_args(argc, argv, "12", &fname, &arg.sep, &offset);
-    SafeStringValue(fname);
-
-    arg.argc = argc ? 1 : 0;
-    arg.io = rb_io_open(StringValueCStr(fname), "r");
-    if (NIL_P(arg.io)) return Qnil;
-    if (!NIL_P(offset)) {
-	rb_io_seek(arg.io, offset, SEEK_SET);
-    }
-    return rb_ensure(io_s_read, (VALUE)&arg, rb_io_close, arg.io);
 }
 
 static VALUE
@@ -5909,7 +5400,6 @@ Init_IO()
 
     rb_define_global_function("syscall", rb_f_syscall, -1);
 
-    rb_define_global_function("open", rb_f_open, -1);
     rb_define_global_function("printf", rb_f_printf, -1);
     rb_define_global_function("print", rb_f_print, -1);
     rb_define_global_function("putc", rb_f_putc, 1);
@@ -5920,8 +5410,6 @@ Init_IO()
     rb_define_global_function("select", rb_f_select, -1);
 
     rb_define_global_function("readlines", rb_f_readlines, -1);
-
-    rb_define_global_function("`", rb_f_backquote, 1);
 
     rb_define_global_function("p", rb_f_p, -1);
     rb_define_method(rb_mKernel, "display", rb_obj_display, -1);
@@ -5934,10 +5422,6 @@ Init_IO()
     rb_define_singleton_method(rb_cIO, "open",  rb_io_s_open, -1);
     rb_define_singleton_method(rb_cIO, "sysopen",  rb_io_s_sysopen, -1);
     rb_define_singleton_method(rb_cIO, "for_fd", rb_io_s_for_fd, -1);
-    rb_define_singleton_method(rb_cIO, "popen", rb_io_s_popen, -1);
-    rb_define_singleton_method(rb_cIO, "foreach", rb_io_s_foreach, -1);
-    rb_define_singleton_method(rb_cIO, "readlines", rb_io_s_readlines, -1);
-    rb_define_singleton_method(rb_cIO, "read", rb_io_s_read, -1);
     rb_define_singleton_method(rb_cIO, "select", rb_f_select, -1);
     rb_define_singleton_method(rb_cIO, "pipe", rb_io_s_pipe, 0);
 
