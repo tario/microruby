@@ -5,7 +5,8 @@ int main(int argc, char* argv[] ) {
 	{
 		RUBY_INIT_STACK
 		ruby_init();
-		rb_eval_string("eee");
+		
+		rb_rescue( rb_eval_string, (VALUE)argv[1], 0,0);
 	    }
 	return 0;
 }
